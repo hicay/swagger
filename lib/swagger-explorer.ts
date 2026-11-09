@@ -62,13 +62,19 @@ import {
   OpenAPIObject,
   SchemaObject
 } from './interfaces/open-api-spec.interface.js';
-import { StandardSchemaConverter } from './interfaces/swagger-document-options.interface.js';
+import {
+  ResponseWrapperOptions,
+  StandardSchemaConverter
+} from './interfaces/swagger-document-options.interface.js';
+import { ApiResponseWrapperMetadata } from './decorators/api-response-wrapper.decorator.js';
 import { MimetypeContentWrapper } from './services/mimetype-content-wrapper.js';
 import { ResponseObjectFactory } from './services/response-object-factory.js';
 import { SchemaObjectFactory } from './services/schema-object-factory.js';
 import { isBodyParameter } from './utils/is-body-parameter.util.js';
 import { isSameParameter } from './utils/is-same-parameter.util.js';
 import { mergeAndUniq } from './utils/merge-and-uniq.util.js';
+import { setOperationContext } from './utils/operation-context.js';
+import { wrapResponseSchemas } from './utils/wrap-response-schemas.util.js';
 
 export class SwaggerExplorer {
   private readonly mimetypeContentWrapper = new MimetypeContentWrapper();
@@ -123,6 +129,7 @@ export class SwaggerExplorer {
       ) => string;
       autoTagControllers?: boolean;
       onlyIncludeDecoratedEndpoints?: boolean;
+      responseWrapper?: ResponseWrapperOptions;
     }
   ) {
     const { operationIdFactory, linkNameFactory } = options;
@@ -188,6 +195,7 @@ export class SwaggerExplorer {
       globalPrefix?: string;
       autoTagControllers?: boolean;
       onlyIncludeDecoratedEndpoints?: boolean;
+      responseWrapper?: ResponseWrapperOptions;
     }
   ): DenormalizedDoc[] {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -266,15 +274,21 @@ export class SwaggerExplorer {
             controllerMetadata,
             omitBy(endpointMetadata, isEmpty)
           );
-          return this.migrateOperationSchema(
-            {
-              responses: {},
-              ...omit(controllerMetadata, 'chunks'),
-              ...mergedMethodMetadata
-            },
-            prototype,
+          return this.finalizeOperation(
+            this.migrateOperationSchema(
+              {
+                responses: {},
+                ...omit(controllerMetadata, 'chunks'),
+                ...mergedMethodMetadata
+              },
+              prototype,
+              targetCallback,
+              metatype
+            ),
+            metatype,
             targetCallback,
-            metatype
+            name,
+            options.responseWrapper
           );
         });
       }
@@ -283,20 +297,84 @@ export class SwaggerExplorer {
         omitBy(methodMetadata, isEmpty)
       );
       return [
-        this.migrateOperationSchema(
-          {
-            responses: {},
-            ...omit(globalMetadata, 'chunks'),
-            ...mergedMethodMetadata
-          },
-          prototype,
+        this.finalizeOperation(
+          this.migrateOperationSchema(
+            {
+              responses: {},
+              ...omit(globalMetadata, 'chunks'),
+              ...mergedMethodMetadata
+            },
+            prototype,
+            targetCallback,
+            metatype
+          ),
+          metatype,
           targetCallback,
-          metatype
+          name,
+          options.responseWrapper
         )
       ];
     });
 
     return flatten(denormalizedPaths).filter((path) => path.root?.path);
+  }
+
+  /**
+   * Records where the operation came from (for operation customizers) and
+   * wraps its response payloads when a response wrapper applies.
+   */
+  private finalizeOperation(
+    document: DenormalizedDoc,
+    metatype: Type<unknown>,
+    handler: Function,
+    methodName: string,
+    documentWrapper?: ResponseWrapperOptions
+  ): DenormalizedDoc {
+    setOperationContext(document, {
+      controller: metatype,
+      handler,
+      methodName
+    });
+
+    const wrapper = this.resolveResponseWrapper(
+      metatype,
+      handler,
+      documentWrapper
+    );
+    if (!wrapper) {
+      return document;
+    }
+    const envelopeName = this.schemaObjectFactory.exploreModelSchema(
+      wrapper.type,
+      this.schemas
+    );
+    if (!envelopeName) {
+      return document;
+    }
+    document.responses = wrapResponseSchemas(
+      document.responses,
+      `#/components/schemas/${envelopeName}`,
+      wrapper
+    );
+    return document;
+  }
+
+  /**
+   * Handler metadata wins over controller metadata, which wins over the
+   * document-wide option. `@ApiResponseWrapper(false)` at any level opts out.
+   */
+  private resolveResponseWrapper(
+    metatype: Type<unknown>,
+    handler: Function,
+    documentWrapper?: ResponseWrapperOptions
+  ): ResponseWrapperOptions | undefined {
+    const metadata: ApiResponseWrapperMetadata | undefined =
+      Reflect.getMetadata(DECORATORS.API_RESPONSE_WRAPPER, handler) ??
+      Reflect.getMetadata(DECORATORS.API_RESPONSE_WRAPPER, metatype);
+    if (!metadata) {
+      return documentWrapper;
+    }
+    return metadata.disabled ? undefined : (metadata as ResponseWrapperOptions);
   }
 
   private isEndpointIncluded(

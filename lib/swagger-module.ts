@@ -239,7 +239,13 @@ export class SwaggerModule {
     }
     removeDanglingLinks(finalDocument);
 
-    return finalDocument;
+    let customizedDocument = finalDocument;
+    for (const customizer of options.documentCustomizers ?? []) {
+      customizedDocument =
+        (customizer(customizedDocument) as OpenAPIObject | undefined) ??
+        customizedDocument;
+    }
+    return customizedDocument;
   }
 
   public static async loadPluginMetadata(

@@ -15,6 +15,7 @@ import { GlobalMetadata } from './interfaces/global-metadata.interface.js';
 import {
   OpenAPIObject,
   OperationIdFactory,
+  ResponseWrapperOptions,
   SwaggerDocumentOptions
 } from './interfaces/index.js';
 import { ModuleRoute } from './interfaces/module-route.interface.js';
@@ -61,7 +62,9 @@ export class SwaggerScanner {
       onlyIncludeDecoratedEndpoints = false,
       excludeDynamicDefaults = false,
       exampleMaxDepth,
-      standardSchemaConverter
+      standardSchemaConverter,
+      operationCustomizers,
+      responseWrapper
     } = options;
 
     this.schemaObjectFactory = new SchemaObjectFactory(
@@ -113,7 +116,8 @@ export class SwaggerScanner {
                 operationIdFactory,
                 linkNameFactory,
                 autoTagControllers,
-                onlyIncludeDecoratedEndpoints
+                onlyIncludeDecoratedEndpoints,
+                responseWrapper
               })
             );
           });
@@ -126,7 +130,8 @@ export class SwaggerScanner {
           operationIdFactory,
           linkNameFactory,
           autoTagControllers,
-          onlyIncludeDecoratedEndpoints
+          onlyIncludeDecoratedEndpoints,
+          responseWrapper
         })
       );
     });
@@ -148,7 +153,7 @@ export class SwaggerScanner {
     );
 
     return {
-      ...this.transformer.normalizePaths(routes),
+      ...this.transformer.normalizePaths(routes, { operationCustomizers }),
       components: {
         schemas: schemas as Record<string, SchemaObject | ReferenceObject>
       }
@@ -232,6 +237,7 @@ export class SwaggerScanner {
       ) => string;
       autoTagControllers?: boolean;
       onlyIncludeDecoratedEndpoints?: boolean;
+      responseWrapper?: ResponseWrapperOptions;
     }
   ): ModuleRoute[] {
     const denormalizedArray = [...controller.values()].map((ctrl) =>

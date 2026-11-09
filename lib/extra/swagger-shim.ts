@@ -61,6 +61,9 @@ export function ApiQuery() {
 export function ApiResponse() {
   return () => {};
 }
+export function ApiResponseWrapper() {
+  return () => {};
+}
 export function ApiContinueResponse() {
   return () => {};
 }

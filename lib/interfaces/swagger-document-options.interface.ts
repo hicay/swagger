@@ -1,7 +1,12 @@
+import type { Type } from '@nestjs/common';
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1
 } from '@standard-schema/spec';
+import type {
+  OpenAPIObject,
+  OperationObject
+} from './open-api-spec.interface.js';
 
 export type OperationIdFactory = (
   controllerKey: string,
@@ -118,4 +123,107 @@ export interface SwaggerDocumentOptions {
    * unsafe casts.
    */
   standardSchemaConverter?: StandardSchemaConverter;
+
+  /**
+   * Hooks that run for every operation after it has been assembled. Use them
+   * to add vendor extensions, rewrite descriptions, or filter operations
+   * based on your own decorators (the handler and controller are passed in
+   * the context). Run in order; a `false` return drops the operation.
+   */
+  operationCustomizers?: OperationCustomizer[];
+
+  /**
+   * Hooks that run on the finished document, in order.
+   */
+  documentCustomizers?: DocumentCustomizer[];
+
+  /**
+   * Wraps every (by default 2xx) response payload into an envelope schema,
+   * mirroring a global response-transform interceptor. Override or disable it
+   * per controller or handler with `@ApiResponseWrapper()`.
+   */
+  responseWrapper?: ResponseWrapperOptions;
+}
+
+/**
+ * Where an operation came from. Handed to every {@link OperationCustomizer}
+ * so it can read the metadata of custom decorators placed on the controller
+ * or the handler.
+ *
+ * @publicApi
+ */
+export interface OperationContext {
+  /**
+   * OpenAPI path template, e.g. `/cats/{id}`.
+   */
+  path: string;
+  /**
+   * Lower-case HTTP method, e.g. `get`.
+   */
+  method: string;
+  /**
+   * The controller class.
+   */
+  controller?: Type<unknown>;
+  /**
+   * The route handler the Nest decorators were applied to.
+   */
+  handler?: Function;
+  /**
+   * Name of the handler on the controller.
+   */
+  methodName?: string;
+  /**
+   * `true` when the operation is emitted under `webhooks`.
+   */
+  isWebhook: boolean;
+}
+
+/**
+ * Runs for every operation once it has been fully assembled. Mutate the
+ * operation in place, return a replacement, or return `false` to leave the
+ * operation out of the document. A path item that loses all its operations
+ * is removed as well.
+ *
+ * @publicApi
+ */
+export type OperationCustomizer = (
+  operation: OperationObject,
+  context: OperationContext
+) => OperationObject | boolean | void;
+
+/**
+ * Runs on the finished document, after every built-in post-processing step.
+ * Mutate the document in place or return a replacement.
+ *
+ * @publicApi
+ */
+export type DocumentCustomizer = (
+  document: OpenAPIObject
+) => OpenAPIObject | void;
+
+/**
+ * Describes how response payloads are wrapped into an envelope, for APIs whose
+ * interceptors return `{ data: <payload> }`-style objects.
+ *
+ * @publicApi
+ */
+export interface ResponseWrapperOptions {
+  /**
+   * The class describing the envelope. It is registered as a component schema
+   * and referenced through `allOf`, so its own properties (`success`,
+   * `meta`, ...) are documented once.
+   */
+  type: Type<unknown> | Function;
+  /**
+   * The envelope property that carries the original payload.
+   * @default 'data'
+   */
+  property?: string;
+  /**
+   * Status codes whose responses are wrapped. Accepts concrete codes (`200`),
+   * ranges (`'2XX'`) and `'default'`.
+   * @default every 2xx response
+   */
+  statusCodes?: Array<number | string>;
 }
